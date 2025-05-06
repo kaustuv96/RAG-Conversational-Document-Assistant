@@ -14,27 +14,37 @@
 
 # In[4]:
 
-# START OF FIX: Ensure pysqlite3-binary is used
 __import__('pysqlite3')
 import sys
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
-# END OF FIX
 
+# Python Standard Libraries immediately 
 import os
-import streamlit as st
-import langchain
-import chromadb # Keep the import since Chroma is used
-import PyPDF2
-from io import BytesIO
+import io # Ensure io is imported if BytesIO is used later
 
-# LangChain specific imports
+# Import chromadb *immediately* after the patch and standard libs
+# This ensures chromadb initializes with the patched sqlite3
+import chromadb # <<<<<<<<<<< IMPORT chromadb HERE
+
+# Now Streamlit, which might also have some early initializations
+import streamlit as st
+
+# Then Langchain and other dependencies
+import langchain # General langchain import
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
-from langchain.vectorstores import Chroma
+# We import Chroma from langchain.vectorstores later, but chromadb itself is now loaded
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
-from langchain.prompts import PromptTemplate # Optional: for custom prompts if needed
-from langchain.schema import HumanMessage, AIMessage # To structure chat history for display
+from langchain.schema import HumanMessage, AIMessage
+
+# Other utilities
+import PyPDF2
+from io import BytesIO # Moved standard lib 'io' import earlier for clarity
+from transformers import AutoTokenizer, logging as hf_logging
+
+# Suppress tokenizer warnings if needed
+hf_logging.set_verbosity_error()
 
 
 # #### Tokenizer for Estimation
