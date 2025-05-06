@@ -4,3 +4,4 @@ langchain_google_genai==2.1.4
 PyPDF2==3.0.1
 streamlit==1.37.1
 transformers==4.51.3
+hnswlib==0.7.0
