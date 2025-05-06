@@ -14,6 +14,11 @@
 
 # In[4]:
 
+# START OF FIX: Ensure pysqlite3-binary is used
+__import__('pysqlite3')
+import sys
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+# END OF FIX
 
 import os
 import streamlit as st
