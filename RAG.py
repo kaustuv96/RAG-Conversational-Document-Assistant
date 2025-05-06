@@ -29,14 +29,14 @@ import chromadb # <<<<<<<<<<< IMPORT chromadb HERE
 # Now Streamlit, which might also have some early initializations
 import streamlit as st
 
-# Then Langchain and other dependencies
-import langchain # General langchain import
+# LangChain specific imports
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
-# We import Chroma from langchain.vectorstores later, but chromadb itself is now loaded
+from langchain.vectorstores import Chroma
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
-from langchain.schema import HumanMessage, AIMessage
+from langchain.prompts import PromptTemplate # Optional: for custom prompts if needed
+from langchain.schema import HumanMessage, AIMessage # To structure chat history for display
 
 # Other utilities
 import PyPDF2
