@@ -14,38 +14,39 @@
 
 # In[4]:
 
+# START OF SQLITE PATCH
 __import__('pysqlite3')
 import sys
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+# END OF SQLITE PATCH
 
-# Python Standard Libraries immediately 
+# Standard Libraries
 import os
-import io # Ensure io is imported if BytesIO is used later
+from io import BytesIO # Use this form
 
-# Import chromadb *immediately* after the patch and standard libs
-# This ensures chromadb initializes with the patched sqlite3
-import chromadb # <<<<<<<<<<< IMPORT chromadb HERE
+# Import chromadb immediately after the patch
+import chromadb
 
-# Now Streamlit, which might also have some early initializations
+# Streamlit
 import streamlit as st
 
-# Then Langchain and other dependencies
-import langchain # General langchain import
+# LangChain and Google GenAI
+import langchain
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
-from langchain.vectorstores import Chroma # <<<<<<<<<<<< ADD THIS LINE (or make sure it's uncommented)
+
+# LangChain Components - THIS IS THE CRITICAL AREA
+from langchain.vectorstores import Chroma 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 from langchain.schema import HumanMessage, AIMessage
 
+# In[5]:
 # Other utilities
 import PyPDF2
-from io import BytesIO # Moved standard lib 'io' import earlier for clarity
 from transformers import AutoTokenizer, logging as hf_logging
 
-# Suppress tokenizer warnings if needed
 hf_logging.set_verbosity_error()
-
 
 # #### Printing the Versions of Libraries Used
 
