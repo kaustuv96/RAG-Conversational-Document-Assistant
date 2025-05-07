@@ -1,4 +1,3 @@
-pysqlite3-binary
 chromadb==1.0.8
 hnswlib==0.7.0
 langchain==0.3.25
