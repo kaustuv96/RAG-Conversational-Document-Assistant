@@ -14,7 +14,7 @@
 
 # In[4]:
 
-# START OF SQLITE PATCH
+# START OF SQLITE PATCH - UNCOMMENT THIS
 import sys
 import importlib.util
 
@@ -27,18 +27,23 @@ if importlib.util.find_spec("pysqlite3"):
 import os
 from io import BytesIO
 
-# Import chromadb immediately after the patch
+# Explicitly import base packages first
+import langchain
+import langchain_community  # Explicit import of the base community package
+import langchain_core
+
+# Import chromadb after the SQLite patch
 import chromadb
 
 # Streamlit
 import streamlit as st
 
-# LangChain and Google GenAI
-import langchain
+# Google GenAI
+import google.generativeai
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 
-# LangChain Components - UPDATED IMPORTS
-from langchain_community.vectorstores import Chroma  # Changed from langchain.vectorstores
+# LangChain Components
+from langchain_community.vectorstores import Chroma  # Now this should work
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
