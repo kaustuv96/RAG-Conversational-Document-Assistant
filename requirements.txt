@@ -3,5 +3,5 @@ PyPDF2==3.0.1
 pysqlite3-binary==0.5.2
 transformers==4.35.0
 google-generativeai==0.3.2
-langchain==0.0.267
+langchain==0.3.25
 chromadb==1.0.8
