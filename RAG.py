@@ -15,14 +15,17 @@
 # In[4]:
 
 # START OF SQLITE PATCH
-#__import__('pysqlite3')
-#import sys
-#sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+import sys
+import importlib.util
+
+if importlib.util.find_spec("pysqlite3"):
+    __import__("pysqlite3")
+    sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
 # END OF SQLITE PATCH
 
 # Standard Libraries
 import os
-from io import BytesIO # Use this form
+from io import BytesIO
 
 # Import chromadb immediately after the patch
 import chromadb
@@ -34,19 +37,19 @@ import streamlit as st
 import langchain
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 
-# LangChain Components - THIS IS THE CRITICAL AREA
-from langchain.vectorstores import Chroma 
+# LangChain Components - UPDATED IMPORTS
+from langchain_community.vectorstores import Chroma  # Changed from langchain.vectorstores
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 from langchain.schema import HumanMessage, AIMessage
 
-# In[5]:
 # Other utilities
 import PyPDF2
 from transformers import AutoTokenizer, logging as hf_logging
 
 hf_logging.set_verbosity_error()
+
 
 # #### Printing the Versions of Libraries Used
 
@@ -323,4 +326,3 @@ if st.session_state.processing_done:
             st.warning("Conversation chain not initialized. Please process a document first.")
 elif not uploaded_file:
     st.info("Please upload a PDF document using the sidebar to begin.")
-
