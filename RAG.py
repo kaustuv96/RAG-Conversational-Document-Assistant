@@ -35,6 +35,11 @@ try:
     # Import chromadb after the patch
     import chromadb
 
+    # LangChain and Google GenAI - explicitly import the package
+    import google.generativeai
+    import langchain
+    import langchain_google_genai
+    
     # LangChain and Google GenAI
     from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 
