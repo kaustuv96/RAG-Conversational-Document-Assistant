@@ -64,7 +64,7 @@ except Exception as e:
 
 # --- Configuration ---
 GEMINI_MODEL_NAME = "gemini-2.0-flash"
-EMBEDDING_MODEL_NAME = "models/embedding-001"  # Standard Gemini embedding model
+EMBEDDING_MODEL_NAME = "models/text-embedding-004"  # Standard Gemini embedding model
 
 def main():
     # --- Streamlit App Layout ---
@@ -169,17 +169,34 @@ def main():
 
                 # b) Split Text
                 text_splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=1200,
-                    chunk_overlap=150,
-                    length_function=len
+                chunk_size=1200,
+                chunk_overlap=150,
+                length_function=len
                 )
                 texts = text_splitter.split_text(raw_text)
                 if not texts:
                     st.error("Failed to split document text.")
                     st.stop()
+            
+                # ADD THESE LINES FOR DEBUGGING:
+                st.info(f"Document split into {len(texts)} text chunks.")
+                if texts:
+                    st.info(f"Length of first chunk (characters): {len(texts[0])}")
+                    # You could even log the total characters to be embedded
+                    total_chars = sum(len(t) for t in texts)
+                    st.info(f"Total characters to embed: {total_chars}")
 
                 # c) Create Embeddings
-                embeddings = GoogleGenerativeAIEmbeddings(model=EMBEDDING_MODEL_NAME, google_api_key=GOOGLE_API_KEY)
+                st.info(f"Initializing embeddings with model: {EMBEDDING_MODEL_NAME}")
+                try:
+                    embeddings = GoogleGenerativeAIEmbeddings(
+                        model=EMBEDDING_MODEL_NAME,
+                        google_api_key=GOOGLE_API_KEY,
+                        request_options={"timeout": 300.0}  # Timeout in seconds (e.g., 300s = 5 minutes)
+                    )
+                except Exception as e_embed_init:
+                    st.error(f"Failed to initialize embedding model: {e_embed_init}")
+                    st.stop()
                 
                 # d) Create Vector Store (ChromaDB In-Memory)
                 st.session_state.vector_store = Chroma.from_texts(
