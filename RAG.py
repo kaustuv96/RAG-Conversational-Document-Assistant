@@ -1,20 +1,6 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# #### Objectives
-# 
-# 1. Develop an AI-Powered Document Q&A Agent with Conversational Memory using RAG.
-# 2. Allow users to upload a PDF, ask questions, and receive answers grounded in the document.
-# 3. Maintain conversation history for follow-up questions.
-# 4. Use Gemini, LangChain, ChromaDB, and Streamlit.
-# 5. Show retrieved context used for grounding the answer.
-# 6. Handle API Key loading securely and track token usage (estimate per turn).
-
-# #### Importing Libraries
-
-#!/usr/bin/env python
-# coding: utf-8
-
 # START OF SQLITE PATCH - This should be at the very top of the file
 import sys
 import importlib.util
@@ -31,14 +17,43 @@ from io import BytesIO
 # Streamlit
 import streamlit as st
 
+# --- Global Google AI Configuration (BEFORE main function) ---
+# Attempt to configure the Google Generative AI client with a longer timeout
+# This needs to be done before LangChain components using Google AI are initialized.
+try:
+    import google.generativeai as genai # Ensure you have this import alias
+
+    GOOGLE_API_KEY_FOR_CONFIG = os.getenv("GOOGLE_API_KEY")
+    if GOOGLE_API_KEY_FOR_CONFIG:
+        # For google-generativeai library version 0.4.0 and later:
+        genai.configure(
+            api_key=GOOGLE_API_KEY_FOR_CONFIG,
+            transport='rest',  # Using REST can sometimes be more robust
+            # request_options argument for newer versions of google-generativeai:
+            request_options={"timeout": 300.0} # Timeout in seconds (300s = 5 minutes)
+        )
+        # If you are using an older version of google-generativeai (e.g., 0.3.x or earlier):
+        # genai.configure(
+        #     api_key=GOOGLE_API_KEY_FOR_CONFIG,
+        #     transport='rest',
+        #     client_options={"request_timeout": 300.0} # client_options for older versions
+        # )
+        print("[INFO] Successfully applied global Google AI configuration with extended timeout.") # For local/console debugging
+    else:
+        print("[WARN] Google API Key not found for global configuration during startup.") # For local/console debugging
+except Exception as e_global_config:
+    # In a Streamlit app, st.warning might not be visible before main() runs fully.
+    # Print is more reliable for seeing if this block executes during startup/import.
+    print(f"[ERROR] Could not apply global Google AI config: {e_global_config}")
+
+
 try:
     # Import chromadb after the patch
     import chromadb
 
     # LangChain and Google GenAI - explicitly import the package
-    import google.generativeai
     import langchain
-    import langchain_google_genai
+    import langchain_google_genai # Make sure this is imported if used directly
     
     # LangChain and Google GenAI
     from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
@@ -56,15 +71,14 @@ try:
 
     hf_logging.set_verbosity_error()
     
-    # Successfully imported everything
     IMPORT_SUCCESS = True
 except Exception as e:
     st.error(f"Failed to import required libraries: {e}")
     IMPORT_SUCCESS = False
 
 # --- Configuration ---
-GEMINI_MODEL_NAME = "gemini-2.0-flash"
-EMBEDDING_MODEL_NAME = "models/text-embedding-004"  # Standard Gemini embedding model
+GEMINI_MODEL_NAME = "gemini-2.0-flash"  # As per your information
+EMBEDDING_MODEL_NAME = "models/text-embedding-004"
 
 def main():
     # --- Streamlit App Layout ---
@@ -168,42 +182,42 @@ def main():
                     st.stop()
 
                 # b) Split Text
+                st.info("Splitting document into smaller chunks...") # DEBUG: Can be removed later
                 text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=1200,
-                chunk_overlap=150,
-                length_function=len
+                    chunk_size=800,    # Smaller chunk size
+                    chunk_overlap=100,   # Adjusted overlap
+                    length_function=len
                 )
                 texts = text_splitter.split_text(raw_text)
                 if not texts:
                     st.error("Failed to split document text.")
                     st.stop()
-            
-                # ADD THESE LINES FOR DEBUGGING:
+
+                # DEBUG LOGS: Can be removed or commented out later
                 st.info(f"Document split into {len(texts)} text chunks.")
                 if texts:
                     st.info(f"Length of first chunk (characters): {len(texts[0])}")
-                    # You could even log the total characters to be embedded
                     total_chars = sum(len(t) for t in texts)
                     st.info(f"Total characters to embed: {total_chars}")
+                # END DEBUG LOGS
 
                 # c) Create Embeddings
-                st.info(f"Initializing embeddings with model: {EMBEDDING_MODEL_NAME}")
-                try:
-                    embeddings = GoogleGenerativeAIEmbeddings(
-                        model=EMBEDDING_MODEL_NAME,
-                        google_api_key=GOOGLE_API_KEY,
-                        request_options={"timeout": 300.0}  # Timeout in seconds (e.g., 300s = 5 minutes)
-                    )
-                except Exception as e_embed_init:
-                    st.error(f"Failed to initialize embedding model: {e_embed_init}")
-                    st.stop()
+                st.info(f"Initializing embeddings with model: {EMBEDDING_MODEL_NAME}") # DEBUG: Can be removed later
+                embeddings = GoogleGenerativeAIEmbeddings(
+                    model=EMBEDDING_MODEL_NAME,
+                    google_api_key=GOOGLE_API_KEY
+                    # The global genai.configure() should handle the timeout for embedding calls.
+                    # task_type="retrieval_document" # Usually default for this model, but can be explicit if needed
+                )
                 
                 # d) Create Vector Store (ChromaDB In-Memory)
+                st.info("Creating vector store with ChromaDB...") # DEBUG: Can be removed later
                 st.session_state.vector_store = Chroma.from_texts(
                     texts=texts,
                     embedding=embeddings,
                 )
                 retriever = st.session_state.vector_store.as_retriever(search_kwargs={"k": 5})
+                st.info("Vector store created successfully.") # DEBUG: Can be removed later
 
                 # e) Create Memory
                 memory = ConversationBufferMemory(
@@ -213,11 +227,17 @@ def main():
                 )
 
                 # f) Create LLM
+                st.info(f"Initializing LLM with model: {GEMINI_MODEL_NAME}") # DEBUG: Can be removed later
                 llm = ChatGoogleGenerativeAI(
                     model=GEMINI_MODEL_NAME,
                     google_api_key=GOOGLE_API_KEY,
                     temperature=0.3,
                     convert_system_message_to_human=True
+                    # If LLM calls also timeout, you might need to add timeout here too:
+                    # For newer langchain-google-genai:
+                    # request_options={"timeout": 300.0}
+                    # For older versions:
+                    # client_options={"request_timeout": 300.0}
                 )
 
                 # g) Create Conversational Retrieval Chain
@@ -238,6 +258,8 @@ def main():
 
             except Exception as e:
                 st.error(f"An error occurred during processing: {e}")
+                import traceback
+                st.error(f"Traceback: {traceback.format_exc()}") # More detailed error for debugging
                 st.session_state.processing_done = False
 
     # --- Display Chat History ---
@@ -245,15 +267,16 @@ def main():
     with chat_container:
         if st.session_state.processing_done:
             for message in st.session_state.chat_history_display:
-                with st.chat_message(message.type):
+                with st.chat_message(message.type): # Use message.type for "human" or "ai"
                      st.markdown(message.content)
-                     if isinstance(message, AIMessage) and hasattr(message, 'source_docs'):
+                     if isinstance(message, AIMessage) and hasattr(message, 'source_docs') and message.source_docs:
                          with st.expander("Show Retrieved Context Used"):
-                            for doc in message.source_docs:
-                                source = doc.metadata.get('source', 'Unknown chunk')
-                                st.markdown(f"**Source:** `{source}`")
+                            for i, doc in enumerate(message.source_docs):
+                                source = doc.metadata.get('source', f'Chunk {i+1}') # Improved fallback
+                                st.markdown(f"**Source Document/Chunk:** `{source}`")
                                 st.caption(doc.page_content)
-                                st.markdown("---")
+                                if i < len(message.source_docs) - 1:
+                                    st.markdown("---")
 
     # --- Chat Input Logic ---
     if st.session_state.processing_done:
@@ -263,7 +286,7 @@ def main():
             if st.session_state.conversation_chain:
                 st.session_state.chat_history_display.append(HumanMessage(content=user_question))
 
-                with chat_container:
+                with chat_container: # Ensure this redraws within the chat_container if needed, or rely on rerun
                     with st.chat_message("human"):
                         st.markdown(user_question)
 
@@ -271,16 +294,17 @@ def main():
                     try:
                         result = st.session_state.conversation_chain({
                             "question": user_question,
+                            # "chat_history": st.session_state.chat_history_langchain # Not needed if memory handles it
                         })
                         answer = result['answer']
-                        retrieved_docs = result['source_documents']
+                        retrieved_docs = result.get('source_documents', []) # Use .get for safety
 
                         st.session_state.cumulative_input_tokens += count_tokens(user_question)
                         st.session_state.cumulative_output_tokens += count_tokens(answer)
                         update_token_display()
 
                         ai_message = AIMessage(content=answer)
-                        ai_message.source_docs = retrieved_docs
+                        ai_message.source_docs = retrieved_docs # Attach source_docs to the AIMessage
 
                         st.session_state.chat_history_display.append(ai_message)
                         st.rerun()
@@ -288,11 +312,14 @@ def main():
                     except Exception as e:
                         st.error(f"An error occurred while getting the answer: {e}")
                         if st.session_state.chat_history_display and isinstance(st.session_state.chat_history_display[-1], HumanMessage):
-                           st.session_state.chat_history_display.pop()
+                           st.session_state.chat_history_display.pop() # Remove last human message if AI fails
+                        import traceback
+                        st.error(f"Traceback: {traceback.format_exc()}")
+
 
             else:
                 st.warning("Conversation chain not initialized. Please process a document first.")
-    elif not uploaded_file:
+    elif not uploaded_file and not st.session_state.processing_done : # Added condition
         st.info("Please upload a PDF document using the sidebar to begin.")
 
 if __name__ == "__main__":
