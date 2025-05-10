@@ -18,7 +18,6 @@
 import os
 import streamlit as st
 import langchain
-import faiss 
 import PyPDF2
 from io import BytesIO
 
