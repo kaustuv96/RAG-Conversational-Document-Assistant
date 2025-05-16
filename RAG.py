@@ -41,7 +41,7 @@ st.set_page_config(page_title="Conversational Document Q&A (RAG)", layout="wide"
 # "gemini-2.0-flash" is not a standard public model name as of mid-2024.
 # Using "gemini-1.5-flash-latest" as a known working alternative.
 # If "gemini-2.0-flash" is correct for your access, you can use that.
-GEMINI_MODEL_NAME = "gemini-1.5-flash-latest"
+GEMINI_MODEL_NAME = "gemini-2.0-flash"
 EMBEDDING_MODEL_NAME = "models/embedding-004" # This is a correct embedding model name
 
 GOOGLE_API_KEY = None
