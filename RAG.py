@@ -37,7 +37,7 @@ import traceback
 st.set_page_config(page_title="Conversational Document Q&A (RAG)", layout="wide")
 
 # --- Configuration ---
-GEMINI_MODEL_NAME = "gemini-1.5-flash-latest" # Or "gemini-pro", etc.
+GEMINI_MODEL_NAME = "gemini-2.0-flash"
 EMBEDDING_MODEL_NAME = "models/embedding-004"
 GOOGLE_API_KEY = None # Initialize
 API_KEY_LOADED_FROM = None # To track source for sidebar message
