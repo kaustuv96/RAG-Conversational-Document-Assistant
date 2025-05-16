@@ -16,6 +16,7 @@ import PyPDF2
 from io import BytesIO
 import time # Not strictly used in current flow but good for potential timing
 import traceback # For detailed error logging
+import logging # For more detailed logging
 
 # LangChain specific imports
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
@@ -26,23 +27,23 @@ from langchain.memory import ConversationBufferMemory
 from langchain.schema import HumanMessage, AIMessage
 
 # Tokenizer for Estimation
-from transformers import AutoTokenizer, logging as hf_logging
-hf_logging.set_verbosity_error()
+from transformers import AutoTokenizer, logging as hf_transformers_logging
+hf_transformers_logging.set_verbosity_error()
 
 # For retries
-from tenacity import retry, stop_after_attempt, wait_random_exponential, retry_if_exception_type
+from tenacity import retry, stop_after_attempt, wait_random_exponential, retry_if_exception_type, before_sleep_log
 from google.api_core import exceptions as google_api_exceptions
+
+# Setup basic logging to see in Streamlit Cloud logs
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # --- Streamlit Page Configuration (MUST BE THE FIRST STREAMLIT COMMAND) ---
 st.set_page_config(page_title="Conversational Document Q&A (RAG)", layout="wide")
 
 # --- Configuration ---
-# IMPORTANT: Please verify this model name.
-# "gemini-2.0-flash" is not a standard public model name as of mid-2024.
-# Using "gemini-1.5-flash-latest" as a known working alternative.
-# If "gemini-2.0-flash" is correct for your access, you can use that.
-GEMINI_MODEL_NAME = "gemini-2.0-flash"
-EMBEDDING_MODEL_NAME = "models/embedding-004" # This is a correct embedding model name
+GEMINI_MODEL_NAME = "gemini-2.0-flash" # As requested by user
+EMBEDDING_MODEL_NAME = "models/embedding-004"
 
 GOOGLE_API_KEY = None
 API_KEY_LOADED_FROM = None
@@ -139,29 +140,39 @@ with st.sidebar:
 
 # --- Retryable functions for embedding and FAISS operations ---
 @retry(
-    wait=wait_random_exponential(min=10, max=90), # Wait 10s, then more, up to 90s
-    stop=stop_after_attempt(5), # Attempt up to 5 times
+    wait=wait_random_exponential(min=15, max=120), # Increased min/max wait times
+    stop=stop_after_attempt(7), # Increased attempts
     retry=retry_if_exception_type((
         google_api_exceptions.DeadlineExceeded,
         google_api_exceptions.ServiceUnavailable,
-        google_api_exceptions.ResourceExhausted,
-    ))
+        google_api_exceptions.ResourceExhausted, # For 429 errors
+        google_api_exceptions.Aborted, # Another possible transient error
+        google_api_exceptions.InternalServerError, # 500 errors from Google
+    )),
+    before_sleep=before_sleep_log(logger, logging.WARNING) # Log before sleeping on retry
 )
 def initialize_faiss_with_retry(initial_texts, embedding_function):
-    st.write(f"Attempting to initialize FAISS with {len(initial_texts)} chunk(s)...")
+    logger.info(f"Attempting to initialize FAISS with {len(initial_texts)} chunk(s).")
+    if initial_texts: # Log content of the first chunk being sent
+        logger.info(f"Content of first chunk for initial FAISS (first 100 chars): '{initial_texts[0][:100]}...'")
     return FAISS.from_texts(texts=initial_texts, embedding=embedding_function)
 
 @retry(
-    wait=wait_random_exponential(min=10, max=90),
-    stop=stop_after_attempt(5),
+    wait=wait_random_exponential(min=15, max=120),
+    stop=stop_after_attempt(7),
     retry=retry_if_exception_type((
         google_api_exceptions.DeadlineExceeded,
         google_api_exceptions.ServiceUnavailable,
         google_api_exceptions.ResourceExhausted,
-    ))
+        google_api_exceptions.Aborted,
+        google_api_exceptions.InternalServerError,
+    )),
+    before_sleep=before_sleep_log(logger, logging.WARNING)
 )
 def embed_and_add_to_faiss_store(faiss_store, text_batch):
-    """Helper function to add texts to FAISS with retry logic applied."""
+    logger.info(f"Attempting to add batch of {len(text_batch)} chunks to FAISS.")
+    if text_batch:
+        logger.info(f"Content of first chunk in current batch (first 100 chars): '{text_batch[0][:100]}...'")
     faiss_store.add_texts(texts=text_batch)
 
 # --- Main Processing Logic ---
@@ -170,18 +181,22 @@ if process_button and uploaded_file is not None:
         try:
             file_bytes = BytesIO(uploaded_file.read())
             st.info(f"📄 Processing PDF: {uploaded_file.name} ({uploaded_file.size / 1024:.1f} KB)")
+            logger.info(f"Processing PDF: {uploaded_file.name}")
 
             raw_text = extract_text_from_pdf(file_bytes)
             if not raw_text:
                 st.error("Failed to extract text from PDF. The PDF might be empty, image-based, or corrupted.")
+                logger.error("Failed to extract text from PDF.")
                 st.stop()
 
             text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200, length_function=len)
             texts = text_splitter.split_text(raw_text)
             if not texts:
                 st.error("Failed to split document text. The document might be empty.")
+                logger.error("Failed to split document text into chunks.")
                 st.stop()
             st.write(f"Document split into {len(texts)} chunks.")
+            logger.info(f"Document split into {len(texts)} chunks.")
 
             embeddings = GoogleGenerativeAIEmbeddings(
                 model=EMBEDDING_MODEL_NAME,
@@ -190,22 +205,28 @@ if process_button and uploaded_file is not None:
             )
 
             st.write("Creating vector store...")
+            logger.info("Creating vector store...")
             
-            INITIAL_FAISS_SETUP_BATCH_SIZE = min(5, len(texts)) # Use a small batch for robust initial setup
+            # Drastically reduce initial setup batch size
+            INITIAL_FAISS_SETUP_BATCH_SIZE = min(2, len(texts)) # Try with just 1 or 2 chunks initially
             initial_setup_texts = texts[:INITIAL_FAISS_SETUP_BATCH_SIZE]
             remaining_texts_for_addition = texts[INITIAL_FAISS_SETUP_BATCH_SIZE:]
 
             if not initial_setup_texts:
-                 st.error("No text chunks available to initialize vector store (even for a small batch).")
+                 st.error("No text chunks available to initialize vector store (even for a minimal batch).")
+                 logger.error("No text chunks for initial FAISS setup.")
                  st.stop()
-
+            
+            logger.info(f"First {len(initial_setup_texts)} chunks for initial setup: {initial_setup_texts}")
             st.session_state.vector_store = initialize_faiss_with_retry(initial_setup_texts, embeddings)
             st.success(f"FAISS index base initialized with the first {len(initial_setup_texts)} chunk(s).")
+            logger.info("FAISS index base initialized.")
 
-            FAISS_ADD_BATCH_SIZE = 25 # Batch size for adding remaining texts, can be tuned
+            FAISS_ADD_BATCH_SIZE = 20 # Batch size for adding remaining texts
 
             if remaining_texts_for_addition:
                 st.write(f"Adding remaining {len(remaining_texts_for_addition)} chunks to FAISS in batches...")
+                logger.info(f"Adding remaining {len(remaining_texts_for_addition)} chunks to FAISS...")
                 num_add_batches = (len(remaining_texts_for_addition) + FAISS_ADD_BATCH_SIZE - 1) // FAISS_ADD_BATCH_SIZE
                 progress_bar = st.progress(0)
                 status_text = st.empty()
@@ -223,15 +244,17 @@ if process_button and uploaded_file is not None:
                     except Exception as e_batch:
                         st.error(f"Failed to embed and add batch {i+1} after multiple retries: {e_batch}")
                         st.warning("Document processing may be incomplete. Try a smaller document or check API status.")
-                        st.error(f"Details for failed batch: {traceback.format_exc()}")
+                        logger.error(f"Failed to embed and add batch {i+1}: {e_batch}\n{traceback.format_exc()}")
                         break 
                     progress_bar.progress((i + 1) / num_add_batches)
                 
                 status_text.text("All batches added to FAISS.")
                 progress_bar.empty()
+                logger.info("Finished adding all batches to FAISS.")
 
             if not st.session_state.vector_store:
                 st.error("Vector store creation failed. Please check logs or try a different document.")
+                logger.error("Vector store is None after processing.")
                 st.stop()
 
             retriever = st.session_state.vector_store.as_retriever(search_kwargs={"k": 5})
@@ -252,10 +275,12 @@ if process_button and uploaded_file is not None:
             st.session_state.cumulative_output_tokens = 0
             update_token_display()
             st.success(f"✅ Document '{uploaded_file.name}' processed successfully! Ready for questions.")
+            logger.info("Document processing completed successfully.")
 
         except Exception as e_main:
             st.error(f"An critical error occurred during document processing: {e_main}")
-            st.error(f"Full traceback: {traceback.format_exc()}")
+            st.error(f"Full traceback is available in the application logs.") # Avoid showing full traceback in UI
+            logger.error(f"Critical error during document processing: {e_main}\n{traceback.format_exc()}")
             st.session_state.processing_done = False
 
 # --- Chat Display and Input Logic ---
@@ -269,27 +294,31 @@ with chat_container:
                      with st.expander("Show Retrieved Context Used"):
                         for i_doc, doc in enumerate(message.source_docs):
                             source_info = f"Chunk from '{doc.metadata.get('source', uploaded_file.name if uploaded_file else 'document')}'"
-                            if 'page' in doc.metadata: # PyPDF2 doesn't add page numbers by default to chunks
-                                source_info += f", Page {doc.metadata['page']}"
-                            st.markdown(f"**{source_info} (Similarity score/rank might be available depending on retriever)**")
+                            # Page numbers are not reliably added by PyPDF2 and RecursiveCharacterTextSplitter
+                            # if 'page' in doc.metadata:
+                            #    source_info += f", Page {doc.metadata['page']}"
+                            st.markdown(f"**{source_info}**")
                             st.caption(doc.page_content)
                             st.markdown("---")
-    elif not uploaded_file and not process_button:
+    elif not uploaded_file and not process_button: # Show only if no file processing has started
         st.info("Please upload a PDF document using the sidebar to begin.")
+
 
 if st.session_state.processing_done:
     user_question = st.chat_input("Ask a question about the document...")
     if user_question:
         if st.session_state.conversation_chain:
             st.session_state.chat_history_display.append(HumanMessage(content=user_question))
-            with chat_container: # Ensure messages are added to the right container
+            with chat_container:
                 with st.chat_message("human"): st.markdown(user_question)
 
             with st.spinner("Thinking..."):
                 try:
+                    logger.info(f"Invoking conversation chain with question: {user_question[:100]}...")
                     result = st.session_state.conversation_chain({"question": user_question})
                     answer = result['answer']
                     retrieved_docs = result['source_documents']
+                    logger.info(f"Received answer: {answer[:100]}...")
                     st.session_state.cumulative_input_tokens += count_tokens(user_question)
                     st.session_state.cumulative_output_tokens += count_tokens(answer)
                     update_token_display()
@@ -299,8 +328,10 @@ if st.session_state.processing_done:
                     st.rerun()
                 except Exception as e_chat:
                     st.error(f"An error occurred while getting the answer: {e_chat}")
-                    st.error(f"Full traceback: {traceback.format_exc()}")
+                    st.error(f"Full traceback is available in the application logs.")
+                    logger.error(f"Error in conversation chain: {e_chat}\n{traceback.format_exc()}")
                     if st.session_state.chat_history_display and isinstance(st.session_state.chat_history_display[-1], HumanMessage):
                        st.session_state.chat_history_display.pop()
         else:
             st.warning("Conversation chain not initialized. Please process a document first.")
+            logger.warning("User asked question but conversation chain is not initialized.")
