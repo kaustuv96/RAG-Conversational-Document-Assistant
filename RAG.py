@@ -51,7 +51,7 @@ hf_logging.set_verbosity_error()
 
 # --- Configuration ---
 GEMINI_MODEL_NAME = "gemini-2.0-flash"
-EMBEDDING_MODEL_NAME = "models/embedding-001" # Standard Gemini embedding model
+EMBEDDING_MODEL_NAME = "models/embedding-004" # Standard Gemini embedding model
 # EMBEDDING_MODEL_NAME = "gemini-embedding-exp-03-07" # Standard Gemini embedding model
 
 # --- API Key Handling ---
